@@ -1,0 +1,46 @@
+# asr_server.py
+import asyncio
+import websockets
+import numpy as np
+from reazonspeech.k2.asr import (
+    load_model,
+    transcribe,
+    audio_from_numpy
+)
+
+SAMPLE_RATE = 16000
+CHUNK_DURATION = 0.5  # 秒
+CHUNK_SIZE = int(SAMPLE_RATE * CHUNK_DURATION)
+
+print("🚀 モデル読み込み中...")
+model = load_model(device='cpu')
+
+async def recognize(websocket):
+    buffer = np.empty((0,), dtype=np.float32)
+    print("🔌 クライアント接続")
+
+    try:
+        async for message in websocket:
+            chunk = np.frombuffer(message, dtype=np.float32)
+            buffer = np.concatenate([buffer, chunk])
+
+            while len(buffer) >= CHUNK_SIZE:
+                segment = buffer[:CHUNK_SIZE]
+                buffer = buffer[CHUNK_SIZE:]
+
+                audio = audio_from_numpy(segment, SAMPLE_RATE)
+                result = transcribe(model, audio)
+                print(f"📝 {result.text}")
+                await websocket.send(result.text)
+
+    except websockets.exceptions.ConnectionClosed:
+        print("🔌 クライアント切断")
+
+async def main():
+    print("📡 WebSocket サーバー起動中 (port=8000)")
+    async with websockets.serve(recognize, "0.0.0.0", 8000):
+        await asyncio.Future()  # 無限ループ
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
